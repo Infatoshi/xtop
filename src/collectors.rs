@@ -115,33 +115,34 @@ fn extract_json_string(line: &str) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn get_apple_gpu_utilization() -> Option<u32> {
-    // Try to get GPU utilization from powermetrics (requires sampling)
-    // For now, we'll use ioreg to check if GPU is active
-    // A more accurate method would require sudo powermetrics
+    // Get GPU utilization from ioreg PerformanceStatistics
+    // The data is in a dict on one line: "Device Utilization %"=XX
 
-    // Check for GPU activity via ioreg
     let output = Command::new("ioreg")
-        .args(["-r", "-c", "IOAccelerator", "-d", "1"])
+        .args(["-r", "-c", "IOAccelerator", "-d", "2"])
         .output()
         .ok()?;
 
     let output_str = String::from_utf8_lossy(&output.stdout);
 
-    // Look for PerformanceStatistics
-    for line in output_str.lines() {
-        if line.contains("PerformanceStatistics") || line.contains("GPU Core Utilization") {
-            // Found GPU stats - actual parsing would be more complex
-            // For now return a placeholder indicating GPU is present
+    // Search for "Device Utilization %"=XX pattern in the entire output
+    // The pattern is: "Device Utilization %"=<number>
+    let search_key = "\"Device Utilization %\"=";
+    if let Some(start) = output_str.find(search_key) {
+        let after_key = &output_str[start + search_key.len()..];
+        let value_str: String = after_key.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(val) = value_str.parse::<u32>() {
+            return Some(val);
         }
-        // Look for "Device Utilization" or similar
-        if line.contains("Device Utilization") {
-            if let Some(pos) = line.find('=') {
-                let value_part = &line[pos+1..];
-                let value_str = value_part.trim().trim_end_matches('%');
-                if let Ok(val) = value_str.parse::<u32>() {
-                    return Some(val);
-                }
-            }
+    }
+
+    // Fallback: try "Renderer Utilization %"
+    let fallback_key = "\"Renderer Utilization %\"=";
+    if let Some(start) = output_str.find(fallback_key) {
+        let after_key = &output_str[start + fallback_key.len()..];
+        let value_str: String = after_key.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(val) = value_str.parse::<u32>() {
+            return Some(val);
         }
     }
 
