@@ -13,7 +13,7 @@ fi
 # Clone and build
 TMPDIR=$(mktemp -d)
 cd "$TMPDIR"
-git clone --depth 1 https://github.com/infatoshi/xtop.git
+git clone --depth 1 https://github.com/Infatoshi/xtop.git
 cd xtop
 cargo install --path .
 
