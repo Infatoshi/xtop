@@ -1,0 +1,24 @@
+[package]
+name = "xtop"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform terminal system monitor"
+license = "MIT"
+repository = "https://github.com/infatoshi/xtop"
+
+[dependencies]
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# System monitoring
+sysinfo = "0.35"
+libc = "0.2"
+
+# Utilities
+chrono = "0.4"
+anyhow = "1.0"
+
+# NVIDIA GPU (Linux only)
+[target.'cfg(target_os = "linux")'.dependencies]
+nvml-wrapper = "0.10"
