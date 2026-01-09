@@ -1,4 +1,4 @@
-use crate::app::{App, CoreData, GpuData, ProcessInfo, CORE_HISTORY_SIZE, HISTORY_SIZE};
+use crate::app::{App, CoreData, GpuData, GpuVendor, ProcessInfo, CORE_HISTORY_SIZE, HISTORY_SIZE};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -281,6 +281,7 @@ impl Collectors {
             let gpu = &mut app.gpus[i as usize];
             gpu.index = i;
             gpu.name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+            gpu.vendor = GpuVendor::Nvidia;
             gpu.driver_version = self.driver_version.clone();
             gpu.cuda_version = self.cuda_version.clone();
 
@@ -382,31 +383,35 @@ impl Collectors {
         let gpu = &mut app.gpus[0];
         gpu.index = 0;
         gpu.name = info.name.clone();
-        gpu.driver_version = info.metal_family.clone();
+        gpu.vendor = GpuVendor::Apple;
+        gpu.driver_version = info.metal_family.clone();  // Metal family version
 
         // Apple Silicon uses unified memory - show system memory usage
         gpu.memory_total_bytes = self.sys.total_memory();
         gpu.memory_used_bytes = self.sys.used_memory();
+        gpu.unified_memory = true;
 
         // Try to get GPU utilization
         gpu.utilization_percent = get_apple_gpu_utilization().unwrap_or(0);
 
-        // Apple Silicon GPU info
+        // Apple Silicon GPU architecture
         gpu.architecture = get_apple_architecture(&info.name);
-        gpu.sm_count = info.gpu_cores;  // GPU cores (not SMs, but similar concept)
-        gpu.cuda_cores = info.gpu_cores;  // Reuse field for GPU cores
 
-        // Apple Silicon specific info
-        let (neural_cores, gpu_perf_cores, gpu_eff_cores) = get_apple_gpu_specs(&info.name);
-        gpu.tensor_cores = neural_cores;  // Neural Engine cores
-        gpu.compute_major = gpu_perf_cores;  // Performance GPU cores
-        gpu.compute_minor = gpu_eff_cores;  // Efficiency GPU cores
+        // Apple GPU core structure:
+        // - GPU Cores: Apple's term (each has 16 EUs with 8 ALUs each = 128 ALUs per core)
+        gpu.gpu_cores = info.gpu_cores;
+        gpu.execution_units = info.gpu_cores * 16;   // 16 EUs per GPU core
+        gpu.alu_count = info.gpu_cores * 128;        // 128 ALUs per GPU core (16 EUs * 8 ALUs)
 
-        // Memory bandwidth estimates for Apple Silicon
-        let (mem_bandwidth_gbps, l2_cache_mb) = get_apple_memory_specs(&info.name);
-        gpu.memory_bus_width = mem_bandwidth_gbps;  // GB/s instead of bits
-        gpu.l2_cache_kb = l2_cache_mb * 1024;
-        gpu.l1_cache_per_sm_kb = 0;  // Not applicable
+        // Neural Engine (separate from GPU)
+        let (neural_cores, neural_tops) = get_apple_neural_engine_specs(&info.name);
+        gpu.neural_engine_cores = neural_cores;
+        gpu.neural_engine_tops = neural_tops;
+
+        // Memory specs
+        let (mem_bandwidth_gbps, slc_mb) = get_apple_memory_specs(&info.name);
+        gpu.memory_bandwidth_gbps = mem_bandwidth_gbps;
+        gpu.slc_mb = slc_mb;
 
         // Power info not easily available without sudo
         gpu.power_usage_w = 0;
@@ -805,41 +810,41 @@ fn get_apple_architecture(name: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn get_apple_gpu_specs(name: &str) -> (u32, u32, u32) {
-    // Returns (neural_engine_cores, performance_cores, efficiency_cores)
-    // Note: GPU cores don't have P/E distinction like CPU, but we track Neural Engine
+fn get_apple_neural_engine_specs(name: &str) -> (u32, u32) {
+    // Returns (neural_engine_cores, performance_in_tops)
+    // Neural Engine is separate from GPU, used for ML inference
     if name.contains("M4 Ultra") {
-        (32, 0, 0)  // 2x Neural Engine
+        (32, 76)   // 2x 16-core NE, ~76 TOPS
     } else if name.contains("M4 Max") {
-        (16, 0, 0)
+        (16, 38)   // 16-core NE, 38 TOPS
     } else if name.contains("M4 Pro") {
-        (16, 0, 0)
+        (16, 38)   // 16-core NE, 38 TOPS
     } else if name.contains("M4") {
-        (16, 0, 0)
+        (16, 38)   // 16-core NE, 38 TOPS
     } else if name.contains("M3 Max") {
-        (16, 0, 0)
+        (16, 18)   // 16-core NE, ~18 TOPS
     } else if name.contains("M3 Pro") {
-        (16, 0, 0)
+        (16, 18)
     } else if name.contains("M3") {
-        (16, 0, 0)
+        (16, 18)
     } else if name.contains("M2 Ultra") {
-        (32, 0, 0)  // 2x Neural Engine
+        (32, 31)   // 2x 16-core NE
     } else if name.contains("M2 Max") {
-        (16, 0, 0)
+        (16, 15)
     } else if name.contains("M2 Pro") {
-        (16, 0, 0)
+        (16, 15)
     } else if name.contains("M2") {
-        (16, 0, 0)
+        (16, 15)
     } else if name.contains("M1 Ultra") {
-        (32, 0, 0)
+        (32, 22)
     } else if name.contains("M1 Max") {
-        (16, 0, 0)
+        (16, 11)
     } else if name.contains("M1 Pro") {
-        (16, 0, 0)
+        (16, 11)
     } else if name.contains("M1") {
-        (16, 0, 0)
+        (16, 11)
     } else {
-        (0, 0, 0)
+        (0, 0)
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::app::{App, KillState, SortColumn};
+use crate::app::{App, GpuVendor, KillState, SortColumn};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -209,13 +209,22 @@ fn draw_gpus_verbose(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
-    let title = format!(
-        " GPU {} | {} | Driver {} | CUDA {} ",
-        gpu.index,
-        gpu.name,
-        gpu.driver_version,
-        gpu.cuda_version
-    );
+    // Different title format for Apple vs NVIDIA
+    let title = match gpu.vendor {
+        GpuVendor::Apple => format!(
+            " GPU {} | {} | {} ",
+            gpu.index,
+            gpu.name,
+            gpu.driver_version  // Metal family
+        ),
+        GpuVendor::Nvidia => format!(
+            " GPU {} | {} | Driver {} | CUDA {} ",
+            gpu.index,
+            gpu.name,
+            gpu.driver_version,
+            gpu.cuda_version
+        ),
+    };
 
     let block = Block::default()
         .title(Span::styled(title, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)))
@@ -239,9 +248,9 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
         .split(inner);
 
     // Stats on left - spaced out vertically
-    let vram_used_gb = gpu.memory_used_bytes as f64 / 1_073_741_824.0;
-    let vram_total_gb = gpu.memory_total_bytes as f64 / 1_073_741_824.0;
-    let vram_percent = if gpu.memory_total_bytes > 0 {
+    let mem_used_gb = gpu.memory_used_bytes as f64 / 1_073_741_824.0;
+    let mem_total_gb = gpu.memory_total_bytes as f64 / 1_073_741_824.0;
+    let mem_percent = if gpu.memory_total_bytes > 0 {
         (gpu.memory_used_bytes as f64 / gpu.memory_total_bytes as f64 * 100.0) as u32
     } else {
         0
@@ -253,32 +262,55 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
         0
     };
 
-    let lines = vec![
+    // Memory label differs: VRAM for NVIDIA, Unified for Apple
+    let mem_label = if gpu.unified_memory { "Mem   " } else { "VRAM  " };
+
+    let mut lines = vec![
         Line::from(vec![
             Span::styled("Util  ", Style::default().fg(DIM)),
             Span::styled(format!("{:>3}%", gpu.utilization_percent), Style::default().fg(usage_color(gpu.utilization_percent as f32))),
         ]),
         Line::from(""),
-        Line::from(vec![
+    ];
+
+    // Temperature (only show if available - Apple often doesn't expose this)
+    if gpu.temperature_c > 0 || gpu.vendor == GpuVendor::Nvidia {
+        lines.push(Line::from(vec![
             Span::styled("Temp  ", Style::default().fg(DIM)),
             Span::styled(format!("{:>3}C", gpu.temperature_c), Style::default().fg(temp_color(gpu.temperature_c))),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("VRAM  ", Style::default().fg(DIM)),
-            Span::styled(format!("{:.1}/{:.1}GB ({:>2}%)", vram_used_gb, vram_total_gb, vram_percent), Style::default().fg(usage_color(vram_percent as f32))),
-        ]),
-        Line::from(""),
-        Line::from(vec![
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled(mem_label, Style::default().fg(DIM)),
+        Span::styled(format!("{:.1}/{:.1}GB ({:>2}%)", mem_used_gb, mem_total_gb, mem_percent), Style::default().fg(usage_color(mem_percent as f32))),
+    ]));
+    lines.push(Line::from(""));
+
+    // Power (only show if we have data)
+    if gpu.power_usage_w > 0 || gpu.power_limit_w > 0 {
+        lines.push(Line::from(vec![
             Span::styled("Power ", Style::default().fg(DIM)),
             Span::styled(format!("{:>3}/{:>3}W ({:>2}%)", gpu.power_usage_w, gpu.power_limit_w, power_percent), Style::default().fg(usage_color(power_percent as f32))),
-        ]),
-        Line::from(""),
-        Line::from(vec![
+        ]));
+        lines.push(Line::from(""));
+    } else if gpu.power_limit_w > 0 {
+        // Show TDP estimate for Apple
+        lines.push(Line::from(vec![
+            Span::styled("TDP   ", Style::default().fg(DIM)),
+            Span::styled(format!("~{}W", gpu.power_limit_w), Style::default().fg(BRIGHT)),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    // Fan (only for NVIDIA - most Macs don't expose fan speed)
+    if gpu.vendor == GpuVendor::Nvidia {
+        lines.push(Line::from(vec![
             Span::styled("Fan   ", Style::default().fg(DIM)),
             Span::styled(format!("{:>3}%", gpu.fan_speed_percent), Style::default().fg(BRIGHT)),
-        ]),
-    ];
+        ]));
+    }
 
     let stats = Paragraph::new(lines);
     frame.render_widget(stats, inner_chunks[0]);
@@ -323,6 +355,19 @@ fn draw_gpu_info(frame: &mut Frame, app: &App, area: Rect) {
 
     let gpu = &app.gpus[0];
 
+    let lines = match gpu.vendor {
+        GpuVendor::Apple => draw_apple_gpu_specs(gpu),
+        GpuVendor::Nvidia => draw_nvidia_gpu_specs(gpu),
+    };
+
+    // Trim to available height
+    let lines: Vec<Line> = lines.into_iter().take(inner.height as usize).collect();
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
+}
+
+fn draw_nvidia_gpu_specs(gpu: &crate::app::GpuData) -> Vec<Line<'static>> {
     // Format L2 cache nicely
     let l2_str = if gpu.l2_cache_kb >= 1024 {
         format!("{} MB", gpu.l2_cache_kb / 1024)
@@ -330,7 +375,7 @@ fn draw_gpu_info(frame: &mut Frame, app: &App, area: Rect) {
         format!("{} KB", gpu.l2_cache_kb)
     };
 
-    let mut lines = vec![
+    vec![
         Line::from(vec![
             Span::styled("Arch       ", Style::default().fg(DIM)),
             Span::styled(format!("{} (SM {}.{})", gpu.architecture, gpu.compute_major, gpu.compute_minor), Style::default().fg(BRIGHT)),
@@ -367,13 +412,52 @@ fn draw_gpu_info(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("PCIe       ", Style::default().fg(DIM)),
             Span::styled(format!("Gen{} x{}", gpu.pcie_gen, gpu.pcie_width), Style::default().fg(BRIGHT)),
         ]),
-    ];
+    ]
+}
 
-    // Trim to available height
-    lines.truncate(inner.height as usize);
+fn draw_apple_gpu_specs(gpu: &crate::app::GpuData) -> Vec<Line<'static>> {
+    // Apple Silicon GPU uses different terminology:
+    // - GPU Cores (not SMs)
+    // - Execution Units (EUs) - 16 per GPU core
+    // - ALUs - 128 per GPU core (8 per EU)
+    // - Neural Engine (separate from GPU)
+    // - System Level Cache (SLC) instead of L2
+    // - Unified Memory with bandwidth in GB/s
 
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, inner);
+    vec![
+        Line::from(vec![
+            Span::styled("Arch       ", Style::default().fg(DIM)),
+            Span::styled(gpu.architecture.clone(), Style::default().fg(BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("GPU Cores  ", Style::default().fg(DIM)),
+            Span::styled(format!("{}", gpu.gpu_cores), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Exec Units ", Style::default().fg(DIM)),
+            Span::styled(format!("{} EUs (16/core)", gpu.execution_units), Style::default().fg(BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("ALUs       ", Style::default().fg(DIM)),
+            Span::styled(format!("{} (128/core)", gpu.alu_count), Style::default().fg(BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("Neural Eng ", Style::default().fg(DIM)),
+            Span::styled(format!("{}-core ({} TOPS)", gpu.neural_engine_cores, gpu.neural_engine_tops), Style::default().fg(Color::Magenta)),
+        ]),
+        Line::from(vec![
+            Span::styled("SLC        ", Style::default().fg(DIM)),
+            Span::styled(format!("{} MB", gpu.slc_mb), Style::default().fg(BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("Mem BW     ", Style::default().fg(DIM)),
+            Span::styled(format!("{} GB/s", gpu.memory_bandwidth_gbps), Style::default().fg(BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("Memory     ", Style::default().fg(DIM)),
+            Span::styled("Unified LPDDR5x".to_string(), Style::default().fg(BRIGHT)),
+        ]),
+    ]
 }
 
 fn draw_network_disk(frame: &mut Frame, app: &App, area: Rect) {

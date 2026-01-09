@@ -17,7 +17,7 @@ cargo install --path .
 ### One-liner
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/infatoshi/xtop/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Infatoshi/xtop/master/install.sh | bash
 ```
 
 ## Usage
@@ -37,7 +37,8 @@ xtop
 
 - CPU usage per core with history graphs
 - Memory and swap usage
-- NVIDIA GPU monitoring (Linux only, requires NVIDIA drivers)
+- NVIDIA GPU monitoring (Linux, requires NVIDIA drivers)
+- Apple Silicon GPU monitoring (macOS, M1/M2/M3/M4 chips)
 - Network and disk I/O
 - Process list with CPU/RAM/VRAM sorting
 - Process kill functionality
@@ -46,3 +47,4 @@ xtop
 
 - Linux or macOS
 - NVIDIA drivers (optional, for GPU monitoring on Linux)
+- Apple Silicon Mac (optional, for GPU monitoring on macOS)

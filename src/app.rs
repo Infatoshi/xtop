@@ -66,10 +66,18 @@ impl Default for MemoryData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuVendor {
+    #[default]
+    Nvidia,
+    Apple,
+}
+
 #[derive(Debug, Clone)]
 pub struct GpuData {
     pub index: u32,
     pub name: String,
+    pub vendor: GpuVendor,
     pub utilization_percent: u32,
     pub temperature_c: u32,
     pub memory_used_bytes: u64,
@@ -77,23 +85,34 @@ pub struct GpuData {
     pub power_usage_w: u32,
     pub power_limit_w: u32,
     pub fan_speed_percent: u32,
-    pub driver_version: String,
-    pub cuda_version: String,
+    pub driver_version: String,  // NVIDIA: driver version, Apple: Metal family
+    pub cuda_version: String,    // NVIDIA only
     pub history: VecDeque<f32>,
-    // GPU metadata (cudaDeviceQuery-style info)
     pub architecture: String,
-    pub compute_major: u32,
-    pub compute_minor: u32,
-    pub sm_count: u32,
-    pub cuda_cores: u32,
-    pub tensor_cores: u32,
-    pub l1_cache_per_sm_kb: u32,
-    pub l2_cache_kb: u32,
-    pub memory_bus_width: u32,
+
+    // NVIDIA-specific fields
+    pub compute_major: u32,      // CUDA compute capability major
+    pub compute_minor: u32,      // CUDA compute capability minor
+    pub sm_count: u32,           // Streaming Multiprocessors
+    pub cuda_cores: u32,         // CUDA cores total
+    pub tensor_cores: u32,       // Tensor cores total
+    pub l1_cache_per_sm_kb: u32, // L1 cache per SM
+    pub l2_cache_kb: u32,        // L2 cache total
+    pub memory_bus_width: u32,   // Memory bus width in bits
     pub memory_clock_mhz: u32,
     pub gpu_clock_mhz: u32,
     pub pcie_gen: u32,
     pub pcie_width: u32,
+
+    // Apple-specific fields
+    pub gpu_cores: u32,              // Apple GPU cores
+    pub execution_units: u32,        // EUs (16 per GPU core)
+    pub alu_count: u32,              // ALUs (128 per GPU core)
+    pub neural_engine_cores: u32,    // Neural Engine cores (separate from GPU)
+    pub neural_engine_tops: u32,     // Neural Engine performance in TOPS
+    pub slc_mb: u32,                 // System Level Cache in MB
+    pub memory_bandwidth_gbps: u32,  // Memory bandwidth in GB/s
+    pub unified_memory: bool,        // True for Apple Silicon
 }
 
 impl Default for GpuData {
@@ -101,6 +120,7 @@ impl Default for GpuData {
         Self {
             index: 0,
             name: String::new(),
+            vendor: GpuVendor::default(),
             utilization_percent: 0,
             temperature_c: 0,
             memory_used_bytes: 0,
@@ -112,6 +132,7 @@ impl Default for GpuData {
             cuda_version: String::new(),
             history: VecDeque::with_capacity(HISTORY_SIZE),
             architecture: String::new(),
+            // NVIDIA fields
             compute_major: 0,
             compute_minor: 0,
             sm_count: 0,
@@ -124,6 +145,15 @@ impl Default for GpuData {
             gpu_clock_mhz: 0,
             pcie_gen: 0,
             pcie_width: 0,
+            // Apple fields
+            gpu_cores: 0,
+            execution_units: 0,
+            alu_count: 0,
+            neural_engine_cores: 0,
+            neural_engine_tops: 0,
+            slc_mb: 0,
+            memory_bandwidth_gbps: 0,
+            unified_memory: false,
         }
     }
 }
