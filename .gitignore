@@ -4,3 +4,8 @@ Cargo.lock
 *.swo
 .DS_Store
 logs/
+
+# Project-specific
+CLAUDE.md
+.claude/
+*.jsonl
