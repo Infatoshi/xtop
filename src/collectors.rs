@@ -1,15 +1,16 @@
-use crate::app::{App, CoreData, ProcessInfo, CORE_HISTORY_SIZE, HISTORY_SIZE};
+use crate::app::{App, CoreData, GpuData, ProcessInfo, CORE_HISTORY_SIZE, HISTORY_SIZE};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use sysinfo::{Components, CpuRefreshKind, Networks, ProcessRefreshKind, RefreshKind, System};
 
 #[cfg(target_os = "linux")]
-use crate::app::GpuData;
-#[cfg(target_os = "linux")]
 use nvml_wrapper::enums::device::UsedGpuMemory;
 #[cfg(target_os = "linux")]
 use nvml_wrapper::Nvml;
+
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 pub struct Collectors {
     sys: System,
@@ -21,8 +22,130 @@ pub struct Collectors {
     driver_version: String,
     #[cfg(target_os = "linux")]
     cuda_version: String,
+    #[cfg(target_os = "macos")]
+    apple_gpu_info: Option<AppleGpuInfo>,
     prev_net: Option<HashMap<String, (u64, u64)>>,
     prev_disk: Option<HashMap<String, (u64, u64)>>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct AppleGpuInfo {
+    name: String,
+    gpu_cores: u32,
+    metal_family: String,
+}
+
+#[cfg(target_os = "macos")]
+fn detect_apple_gpu() -> Option<AppleGpuInfo> {
+    // Use system_profiler to get GPU info
+    let output = Command::new("system_profiler")
+        .args(["SPDisplaysDataType", "-json"])
+        .output()
+        .ok()?;
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON manually (simple approach to avoid adding serde dependency)
+    let mut name = String::new();
+    let mut gpu_cores = 0u32;
+
+    // Look for chipset_model or chip_type
+    for line in json_str.lines() {
+        let line = line.trim();
+        if line.contains("\"sppci_model\"") || line.contains("\"chipset_model\"") {
+            if let Some(value) = extract_json_string(line) {
+                name = value;
+            }
+        }
+        if line.contains("\"sppci_cores\"") || line.contains("\"gpu_cores\"") {
+            if let Some(value) = extract_json_string(line) {
+                gpu_cores = value.parse().unwrap_or(0);
+            }
+        }
+    }
+
+    // If we didn't find it, try sysctl for Apple Silicon
+    if name.is_empty() {
+        if let Ok(output) = Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output() {
+            let brand = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if brand.contains("Apple") {
+                // Extract chip name (M1, M2, M3, etc.)
+                name = brand.clone();
+            }
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // Determine Metal family based on chip
+    let metal_family = if name.contains("M4") {
+        "Metal 3, Apple GPU Family 9".to_string()
+    } else if name.contains("M3") {
+        "Metal 3, Apple GPU Family 9".to_string()
+    } else if name.contains("M2") {
+        "Metal 3, Apple GPU Family 8".to_string()
+    } else if name.contains("M1") {
+        "Metal 3, Apple GPU Family 7".to_string()
+    } else {
+        "Metal".to_string()
+    };
+
+    Some(AppleGpuInfo {
+        name,
+        gpu_cores,
+        metal_family,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn extract_json_string(line: &str) -> Option<String> {
+    // Simple JSON string extraction: "key" : "value" or "key": "value"
+    let parts: Vec<&str> = line.splitn(2, ':').collect();
+    if parts.len() == 2 {
+        let value = parts[1].trim().trim_matches(',').trim_matches('"').trim();
+        if !value.is_empty() && value != "null" {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn get_apple_gpu_utilization() -> Option<u32> {
+    // Try to get GPU utilization from powermetrics (requires sampling)
+    // For now, we'll use ioreg to check if GPU is active
+    // A more accurate method would require sudo powermetrics
+
+    // Check for GPU activity via ioreg
+    let output = Command::new("ioreg")
+        .args(["-r", "-c", "IOAccelerator", "-d", "1"])
+        .output()
+        .ok()?;
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+
+    // Look for PerformanceStatistics
+    for line in output_str.lines() {
+        if line.contains("PerformanceStatistics") || line.contains("GPU Core Utilization") {
+            // Found GPU stats - actual parsing would be more complex
+            // For now return a placeholder indicating GPU is present
+        }
+        // Look for "Device Utilization" or similar
+        if line.contains("Device Utilization") {
+            if let Some(pos) = line.find('=') {
+                let value_part = &line[pos+1..];
+                let value_str = value_part.trim().trim_end_matches('%');
+                if let Ok(val) = value_str.parse::<u32>() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 impl Collectors {
@@ -45,6 +168,9 @@ impl Collectors {
             (String::new(), String::new())
         };
 
+        #[cfg(target_os = "macos")]
+        let apple_gpu_info = detect_apple_gpu();
+
         Self {
             sys,
             networks,
@@ -55,6 +181,8 @@ impl Collectors {
             driver_version,
             #[cfg(target_os = "linux")]
             cuda_version,
+            #[cfg(target_os = "macos")]
+            apple_gpu_info,
             prev_net: None,
             prev_disk: None,
         }
@@ -84,10 +212,8 @@ impl Collectors {
         app.cpu.core_count = cpu_info.len();
         app.cpu.usage_percent = self.sys.global_cpu_usage();
 
-        // Get max frequency across cores
         app.cpu.frequency_mhz = cpu_info.iter().map(|c| c.frequency()).max().unwrap_or(0);
 
-        // Get CPU temperature from components
         app.cpu.temperature_c = self.components.iter()
             .find(|c| {
                 let label = c.label().to_lowercase();
@@ -95,13 +221,11 @@ impl Collectors {
             })
             .and_then(|c| c.temperature());
 
-        // Update overall history
         if app.cpu.history.len() >= HISTORY_SIZE {
             app.cpu.history.pop_front();
         }
         app.cpu.history.push_back(app.cpu.usage_percent);
 
-        // Update per-core data
         while app.cpu.cores.len() < cpu_info.len() {
             app.cpu.cores.push(CoreData::default());
         }
@@ -242,7 +366,61 @@ impl Collectors {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    fn collect_gpu(&mut self, app: &mut App) {
+        let Some(ref info) = self.apple_gpu_info else {
+            app.gpus.clear();
+            return;
+        };
+
+        // Ensure we have one GPU entry
+        if app.gpus.is_empty() {
+            app.gpus.push(GpuData::default());
+        }
+        app.gpus.truncate(1);
+
+        let gpu = &mut app.gpus[0];
+        gpu.index = 0;
+        gpu.name = info.name.clone();
+        gpu.driver_version = info.metal_family.clone();
+
+        // Apple Silicon uses unified memory - show system memory usage
+        gpu.memory_total_bytes = self.sys.total_memory();
+        gpu.memory_used_bytes = self.sys.used_memory();
+
+        // Try to get GPU utilization
+        gpu.utilization_percent = get_apple_gpu_utilization().unwrap_or(0);
+
+        // Apple Silicon GPU info
+        gpu.architecture = get_apple_architecture(&info.name);
+        gpu.sm_count = info.gpu_cores;  // GPU cores (not SMs, but similar concept)
+        gpu.cuda_cores = info.gpu_cores;  // Reuse field for GPU cores
+
+        // Apple Silicon specific info
+        let (neural_cores, gpu_perf_cores, gpu_eff_cores) = get_apple_gpu_specs(&info.name);
+        gpu.tensor_cores = neural_cores;  // Neural Engine cores
+        gpu.compute_major = gpu_perf_cores;  // Performance GPU cores
+        gpu.compute_minor = gpu_eff_cores;  // Efficiency GPU cores
+
+        // Memory bandwidth estimates for Apple Silicon
+        let (mem_bandwidth_gbps, l2_cache_mb) = get_apple_memory_specs(&info.name);
+        gpu.memory_bus_width = mem_bandwidth_gbps;  // GB/s instead of bits
+        gpu.l2_cache_kb = l2_cache_mb * 1024;
+        gpu.l1_cache_per_sm_kb = 0;  // Not applicable
+
+        // Power info not easily available without sudo
+        gpu.power_usage_w = 0;
+        gpu.power_limit_w = get_apple_tdp(&info.name);
+        gpu.temperature_c = 0;  // Would need SMC access
+        gpu.fan_speed_percent = 0;  // Most Macs don't expose this
+
+        if gpu.history.len() >= HISTORY_SIZE {
+            gpu.history.pop_front();
+        }
+        gpu.history.push_back(gpu.utilization_percent as f32);
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn collect_gpu(&mut self, app: &mut App) {
         app.gpus.clear();
     }
@@ -253,7 +431,11 @@ impl Collectors {
         let mut total_tx = 0u64;
 
         for (name, data) in self.networks.iter() {
-            if name == "lo" || name.starts_with("docker") || name.starts_with("veth") {
+            // Skip loopback and virtual interfaces
+            if name == "lo" || name == "lo0"
+                || name.starts_with("docker") || name.starts_with("veth")
+                || name.starts_with("bridge") || name.starts_with("vmnet")
+            {
                 continue;
             }
             let rx = data.total_received();
@@ -277,6 +459,7 @@ impl Collectors {
         self.prev_net = Some(current);
     }
 
+    #[cfg(target_os = "linux")]
     fn collect_disk(&mut self, app: &mut App, interval_secs: f64) {
         let current = parse_diskstats();
 
@@ -298,6 +481,21 @@ impl Collectors {
         self.prev_disk = Some(current);
     }
 
+    #[cfg(target_os = "macos")]
+    fn collect_disk(&mut self, app: &mut App, _interval_secs: f64) {
+        // macOS disk stats via iostat would require parsing or using IOKit
+        // For now, just show zeros - could be enhanced later
+        app.disk.read_bytes_per_sec = 0.0;
+        app.disk.write_bytes_per_sec = 0.0;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn collect_disk(&mut self, app: &mut App, _interval_secs: f64) {
+        app.disk.read_bytes_per_sec = 0.0;
+        app.disk.write_bytes_per_sec = 0.0;
+    }
+
+    #[cfg(target_os = "linux")]
     fn collect_battery(&self, app: &mut App) {
         let battery_path = std::path::Path::new("/sys/class/power_supply");
         if !battery_path.exists() {
@@ -326,6 +524,39 @@ impl Collectors {
             }
         }
 
+        app.battery.present = false;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn collect_battery(&self, app: &mut App) {
+        // Use pmset to get battery info on macOS
+        if let Ok(output) = Command::new("pmset").args(["-g", "batt"]).output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+
+            // Parse output like: "InternalBattery-0 (id=...) 85%; charging; ..."
+            for line in output_str.lines() {
+                if line.contains("InternalBattery") {
+                    app.battery.present = true;
+
+                    // Extract percentage
+                    if let Some(pct_pos) = line.find('%') {
+                        let start = line[..pct_pos].rfind(|c: char| !c.is_ascii_digit()).map(|p| p + 1).unwrap_or(0);
+                        if let Ok(pct) = line[start..pct_pos].parse::<u8>() {
+                            app.battery.percent = pct;
+                        }
+                    }
+
+                    app.battery.charging = line.contains("charging") && !line.contains("discharging");
+                    return;
+                }
+            }
+        }
+
+        app.battery.present = false;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn collect_battery(&self, app: &mut App) {
         app.battery.present = false;
     }
 
@@ -488,6 +719,7 @@ fn get_gpu_specs(name: &str, compute_major: u32, compute_minor: u32, sm_count: u
     (cores_per_sm, tensor_per_sm, l1_per_sm, l2_kb, bus_width, mem_clock, gpu_clock)
 }
 
+#[cfg(target_os = "linux")]
 fn parse_diskstats() -> HashMap<String, (u64, u64)> {
     let mut result = HashMap::new();
 
@@ -524,4 +756,139 @@ fn parse_diskstats() -> HashMap<String, (u64, u64)> {
     }
 
     result
+}
+
+// Apple Silicon helper functions
+#[cfg(target_os = "macos")]
+fn get_apple_architecture(name: &str) -> String {
+    if name.contains("M4") {
+        "Apple M4".to_string()
+    } else if name.contains("M3") {
+        if name.contains("Max") {
+            "Apple M3 Max".to_string()
+        } else if name.contains("Pro") {
+            "Apple M3 Pro".to_string()
+        } else {
+            "Apple M3".to_string()
+        }
+    } else if name.contains("M2") {
+        if name.contains("Ultra") {
+            "Apple M2 Ultra".to_string()
+        } else if name.contains("Max") {
+            "Apple M2 Max".to_string()
+        } else if name.contains("Pro") {
+            "Apple M2 Pro".to_string()
+        } else {
+            "Apple M2".to_string()
+        }
+    } else if name.contains("M1") {
+        if name.contains("Ultra") {
+            "Apple M1 Ultra".to_string()
+        } else if name.contains("Max") {
+            "Apple M1 Max".to_string()
+        } else if name.contains("Pro") {
+            "Apple M1 Pro".to_string()
+        } else {
+            "Apple M1".to_string()
+        }
+    } else {
+        "Apple Silicon".to_string()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn get_apple_gpu_specs(name: &str) -> (u32, u32, u32) {
+    // Returns (neural_engine_cores, performance_cores, efficiency_cores)
+    // Note: GPU cores don't have P/E distinction like CPU, but we track Neural Engine
+    if name.contains("M4") {
+        (16, 0, 0)  // M4 has 16-core Neural Engine
+    } else if name.contains("M3 Max") {
+        (16, 0, 0)
+    } else if name.contains("M3 Pro") {
+        (16, 0, 0)
+    } else if name.contains("M3") {
+        (16, 0, 0)
+    } else if name.contains("M2 Ultra") {
+        (32, 0, 0)  // 2x Neural Engine
+    } else if name.contains("M2 Max") {
+        (16, 0, 0)
+    } else if name.contains("M2 Pro") {
+        (16, 0, 0)
+    } else if name.contains("M2") {
+        (16, 0, 0)
+    } else if name.contains("M1 Ultra") {
+        (32, 0, 0)
+    } else if name.contains("M1 Max") {
+        (16, 0, 0)
+    } else if name.contains("M1 Pro") {
+        (16, 0, 0)
+    } else if name.contains("M1") {
+        (16, 0, 0)
+    } else {
+        (0, 0, 0)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn get_apple_memory_specs(name: &str) -> (u32, u32) {
+    // Returns (memory_bandwidth_gbps, system_level_cache_mb)
+    if name.contains("M4") {
+        (120, 16)  // Estimated for M4
+    } else if name.contains("M3 Max") {
+        (400, 48)
+    } else if name.contains("M3 Pro") {
+        (150, 24)
+    } else if name.contains("M3") {
+        (100, 16)
+    } else if name.contains("M2 Ultra") {
+        (800, 192)
+    } else if name.contains("M2 Max") {
+        (400, 96)
+    } else if name.contains("M2 Pro") {
+        (200, 32)
+    } else if name.contains("M2") {
+        (100, 16)
+    } else if name.contains("M1 Ultra") {
+        (800, 128)
+    } else if name.contains("M1 Max") {
+        (400, 64)
+    } else if name.contains("M1 Pro") {
+        (200, 32)
+    } else if name.contains("M1") {
+        (68, 16)
+    } else {
+        (100, 8)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn get_apple_tdp(name: &str) -> u32 {
+    // Approximate TDP in watts
+    if name.contains("M4") {
+        22
+    } else if name.contains("M3 Max") {
+        92
+    } else if name.contains("M3 Pro") {
+        45
+    } else if name.contains("M3") {
+        22
+    } else if name.contains("M2 Ultra") {
+        215
+    } else if name.contains("M2 Max") {
+        96
+    } else if name.contains("M2 Pro") {
+        45
+    } else if name.contains("M2") {
+        22
+    } else if name.contains("M1 Ultra") {
+        215
+    } else if name.contains("M1 Max") {
+        92
+    } else if name.contains("M1 Pro") {
+        40
+    } else if name.contains("M1") {
+        20
+    } else {
+        30
+    }
 }

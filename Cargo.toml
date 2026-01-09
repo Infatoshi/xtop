@@ -22,3 +22,9 @@ anyhow = "1.0"
 # NVIDIA GPU (Linux only)
 [target.'cfg(target_os = "linux")'.dependencies]
 nvml-wrapper = "0.10"
+
+# Apple GPU (macOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+io-kit-sys = "0.4"
+mach2 = "0.4"
