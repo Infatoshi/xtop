@@ -82,13 +82,13 @@ fn detect_apple_gpu() -> Option<AppleGpuInfo> {
 
     // Determine Metal family based on chip
     let metal_family = if name.contains("M4") {
-        "Metal 3, Apple GPU Family 9".to_string()
+        "Metal 4".to_string()
     } else if name.contains("M3") {
-        "Metal 3, Apple GPU Family 9".to_string()
+        "Metal 3".to_string()
     } else if name.contains("M2") {
-        "Metal 3, Apple GPU Family 8".to_string()
+        "Metal 3".to_string()
     } else if name.contains("M1") {
-        "Metal 3, Apple GPU Family 7".to_string()
+        "Metal 3".to_string()
     } else {
         "Metal".to_string()
     };
@@ -762,7 +762,15 @@ fn parse_diskstats() -> HashMap<String, (u64, u64)> {
 #[cfg(target_os = "macos")]
 fn get_apple_architecture(name: &str) -> String {
     if name.contains("M4") {
-        "Apple M4".to_string()
+        if name.contains("Ultra") {
+            "Apple M4 Ultra".to_string()
+        } else if name.contains("Max") {
+            "Apple M4 Max".to_string()
+        } else if name.contains("Pro") {
+            "Apple M4 Pro".to_string()
+        } else {
+            "Apple M4".to_string()
+        }
     } else if name.contains("M3") {
         if name.contains("Max") {
             "Apple M3 Max".to_string()
@@ -800,8 +808,14 @@ fn get_apple_architecture(name: &str) -> String {
 fn get_apple_gpu_specs(name: &str) -> (u32, u32, u32) {
     // Returns (neural_engine_cores, performance_cores, efficiency_cores)
     // Note: GPU cores don't have P/E distinction like CPU, but we track Neural Engine
-    if name.contains("M4") {
-        (16, 0, 0)  // M4 has 16-core Neural Engine
+    if name.contains("M4 Ultra") {
+        (32, 0, 0)  // 2x Neural Engine
+    } else if name.contains("M4 Max") {
+        (16, 0, 0)
+    } else if name.contains("M4 Pro") {
+        (16, 0, 0)
+    } else if name.contains("M4") {
+        (16, 0, 0)
     } else if name.contains("M3 Max") {
         (16, 0, 0)
     } else if name.contains("M3 Pro") {
@@ -832,8 +846,14 @@ fn get_apple_gpu_specs(name: &str) -> (u32, u32, u32) {
 #[cfg(target_os = "macos")]
 fn get_apple_memory_specs(name: &str) -> (u32, u32) {
     // Returns (memory_bandwidth_gbps, system_level_cache_mb)
-    if name.contains("M4") {
-        (120, 16)  // Estimated for M4
+    if name.contains("M4 Ultra") {
+        (800, 192)  // Estimated - 2x M4 Max
+    } else if name.contains("M4 Max") {
+        (546, 48)   // 546 GB/s, 48 MB SLC
+    } else if name.contains("M4 Pro") {
+        (273, 24)   // 273 GB/s
+    } else if name.contains("M4") {
+        (120, 16)
     } else if name.contains("M3 Max") {
         (400, 48)
     } else if name.contains("M3 Pro") {
@@ -864,7 +884,13 @@ fn get_apple_memory_specs(name: &str) -> (u32, u32) {
 #[cfg(target_os = "macos")]
 fn get_apple_tdp(name: &str) -> u32 {
     // Approximate TDP in watts
-    if name.contains("M4") {
+    if name.contains("M4 Ultra") {
+        215
+    } else if name.contains("M4 Max") {
+        116  // M4 Max in 16" MBP
+    } else if name.contains("M4 Pro") {
+        45
+    } else if name.contains("M4") {
         22
     } else if name.contains("M3 Max") {
         92
