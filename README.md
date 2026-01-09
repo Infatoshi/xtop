@@ -29,7 +29,7 @@ xtop
 ### Controls
 
 - `j/k` or arrow keys: navigate processes
-- `h/l` or left/right: change sort column (CPU/RAM/GPU)
+- `h/l` or left/right: change sort column (CPU/RAM/GPU/VRAM)
 - `K`: kill selected process (with confirmation)
 - `q`: quit
 

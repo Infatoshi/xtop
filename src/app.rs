@@ -193,6 +193,7 @@ pub enum SortColumn {
     Cpu,
     Ram,
     Gpu,
+    Vram,
 }
 
 impl SortColumn {
@@ -200,15 +201,17 @@ impl SortColumn {
         match self {
             Self::Cpu => Self::Ram,
             Self::Ram => Self::Gpu,
-            Self::Gpu => Self::Cpu,
+            Self::Gpu => Self::Vram,
+            Self::Vram => Self::Cpu,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Cpu => Self::Gpu,
+            Self::Cpu => Self::Vram,
             Self::Ram => Self::Cpu,
             Self::Gpu => Self::Ram,
+            Self::Vram => Self::Gpu,
         }
     }
 
@@ -217,6 +220,7 @@ impl SortColumn {
             Self::Cpu => "CPU",
             Self::Ram => "RAM",
             Self::Gpu => "GPU",
+            Self::Vram => "VRAM",
         }
     }
 }
@@ -268,7 +272,7 @@ impl App {
             SortColumn::Ram => self.processes.sort_by(|a, b| {
                 b.memory_percent.partial_cmp(&a.memory_percent).unwrap_or(std::cmp::Ordering::Equal)
             }),
-            SortColumn::Gpu => self.processes.sort_by(|a, b| {
+            SortColumn::Gpu | SortColumn::Vram => self.processes.sort_by(|a, b| {
                 let a_gpu = a.gpu_memory_bytes.unwrap_or(0);
                 let b_gpu = b.gpu_memory_bytes.unwrap_or(0);
                 b_gpu.cmp(&a_gpu)

@@ -523,13 +523,19 @@ fn draw_processes(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Header row
+    // GPU and VRAM both sort by GPU memory, show indicator for either
+    let gpu_vram_indicator = if app.sort_column == SortColumn::Gpu || app.sort_column == SortColumn::Vram {
+        " ▼"
+    } else {
+        ""
+    };
     let header = Row::new(vec![
         format!("{:>7}", "PID"),
         format!("{:<20}", "NAME"),
         format!("{:>6}{}", "CPU%", sort_indicator(SortColumn::Cpu)),
         format!("{:>6}{}", "RAM%", sort_indicator(SortColumn::Ram)),
         format!("{:>9}", "RAM"),
-        format!("{:>9}{}", "GPU", sort_indicator(SortColumn::Gpu)),
+        format!("{:>9}{}", "VRAM", gpu_vram_indicator),
     ])
     .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
 
