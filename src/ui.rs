@@ -282,23 +282,26 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
 
     let mut line2_spans = Vec::new();
 
-    // Power
-    if gpu.power_usage_w > 0 {
-        let power_percent = if gpu.power_limit_w > 0 {
-            (gpu.power_usage_w as f64 / gpu.power_limit_w as f64 * 100.0) as u32
+    // Power (now with decimal precision - values stored in milliwatts)
+    if gpu.power_usage_mw > 0 {
+        let power_w = gpu.power_usage_mw as f64 / 1000.0;
+        let limit_w = gpu.power_limit_mw as f64 / 1000.0;
+        let power_percent = if gpu.power_limit_mw > 0 {
+            (gpu.power_usage_mw as f64 / gpu.power_limit_mw as f64 * 100.0) as u32
         } else {
             0
         };
         line2_spans.push(Span::styled("Power ", Style::default().fg(DIM)));
         line2_spans.push(Span::styled(
-            format!("{:>3}/{:>3}W", gpu.power_usage_w, gpu.power_limit_w),
+            format!("{:>5.1}/{:.0}W", power_w, limit_w),
             Style::default().fg(usage_color(power_percent as f32))
         ));
         line2_spans.push(Span::raw("  "));
-    } else if gpu.power_limit_w > 0 {
+    } else if gpu.power_limit_mw > 0 {
         // Show TDP estimate for Apple
+        let limit_w = gpu.power_limit_mw / 1000;
         line2_spans.push(Span::styled("TDP ", Style::default().fg(DIM)));
-        line2_spans.push(Span::styled(format!("~{}W", gpu.power_limit_w), Style::default().fg(BRIGHT)));
+        line2_spans.push(Span::styled(format!("~{}W", limit_w), Style::default().fg(BRIGHT)));
         line2_spans.push(Span::raw("  "));
     }
 
@@ -306,6 +309,13 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
     if gpu.vendor == GpuVendor::Nvidia && gpu.fan_speed_percent > 0 {
         line2_spans.push(Span::styled("Fan ", Style::default().fg(DIM)));
         line2_spans.push(Span::styled(format!("{:>3}%", gpu.fan_speed_percent), Style::default().fg(BRIGHT)));
+        line2_spans.push(Span::raw("  "));
+    }
+
+    // Current clock (varies in real-time)
+    if gpu.current_gpu_clock_mhz > 0 {
+        line2_spans.push(Span::styled("Clk ", Style::default().fg(DIM)));
+        line2_spans.push(Span::styled(format!("{}MHz", gpu.current_gpu_clock_mhz), Style::default().fg(BRIGHT)));
     }
 
     let lines = vec![

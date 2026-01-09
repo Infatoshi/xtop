@@ -197,6 +197,7 @@ impl Collectors {
         self.collect_cpu(app);
         self.collect_memory(app);
         self.collect_gpu(app);
+
         self.collect_network(app, interval_secs);
         self.collect_disk(app, interval_secs);
         self.collect_battery(app);
@@ -300,11 +301,12 @@ impl Collectors {
                 gpu.memory_total_bytes = mem.total;
             }
 
-            gpu.power_usage_w = device.power_usage().unwrap_or(0) / 1000;
-            gpu.power_limit_w = device
+            // Store power in milliwatts for precision (NVML returns mW)
+            gpu.power_usage_mw = device.power_usage().unwrap_or(0);
+            gpu.power_limit_mw = device
                 .enforced_power_limit()
                 .or_else(|_| device.power_management_limit())
-                .unwrap_or(0) / 1000;
+                .unwrap_or(0);
 
             gpu.fan_speed_percent = device.fan_speed(0).unwrap_or(0);
 
@@ -352,6 +354,14 @@ impl Collectors {
             }
             if let Ok(max_mem_clock) = device.max_clock_info(nvml_wrapper::enum_wrappers::device::Clock::Memory) {
                 gpu.memory_clock_mhz = max_mem_clock;
+            }
+
+            // Current clock speeds (these vary in real-time)
+            if let Ok(cur_clock) = device.clock_info(nvml_wrapper::enum_wrappers::device::Clock::Graphics) {
+                gpu.current_gpu_clock_mhz = cur_clock;
+            }
+            if let Ok(cur_mem_clock) = device.clock_info(nvml_wrapper::enum_wrappers::device::Clock::Memory) {
+                gpu.current_mem_clock_mhz = cur_mem_clock;
             }
 
             if let Ok(pcie_link) = device.current_pcie_link_gen() {
@@ -415,8 +425,8 @@ impl Collectors {
         gpu.slc_mb = slc_mb;
 
         // Power info not easily available without sudo
-        gpu.power_usage_w = 0;
-        gpu.power_limit_w = get_apple_tdp(&info.name);
+        gpu.power_usage_mw = 0;
+        gpu.power_limit_mw = get_apple_tdp(&info.name) * 1000;  // Convert W to mW
         gpu.temperature_c = 0;  // Would need SMC access
         gpu.fan_speed_percent = 0;  // Most Macs don't expose this
 

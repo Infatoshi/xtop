@@ -82,8 +82,8 @@ pub struct GpuData {
     pub temperature_c: u32,
     pub memory_used_bytes: u64,
     pub memory_total_bytes: u64,
-    pub power_usage_w: u32,
-    pub power_limit_w: u32,
+    pub power_usage_mw: u32,    // milliwatts for precision
+    pub power_limit_mw: u32,    // milliwatts
     pub fan_speed_percent: u32,
     pub driver_version: String,  // NVIDIA: driver version, Apple: Metal family
     pub cuda_version: String,    // NVIDIA only
@@ -99,8 +99,10 @@ pub struct GpuData {
     pub l1_cache_per_sm_kb: u32, // L1 cache per SM
     pub l2_cache_kb: u32,        // L2 cache total
     pub memory_bus_width: u32,   // Memory bus width in bits
-    pub memory_clock_mhz: u32,
-    pub gpu_clock_mhz: u32,
+    pub memory_clock_mhz: u32,      // max memory clock
+    pub gpu_clock_mhz: u32,         // max GPU clock
+    pub current_gpu_clock_mhz: u32, // current GPU clock (varies)
+    pub current_mem_clock_mhz: u32, // current memory clock (varies)
     pub pcie_gen: u32,
     pub pcie_width: u32,
 
@@ -125,8 +127,8 @@ impl Default for GpuData {
             temperature_c: 0,
             memory_used_bytes: 0,
             memory_total_bytes: 0,
-            power_usage_w: 0,
-            power_limit_w: 0,
+            power_usage_mw: 0,
+            power_limit_mw: 0,
             fan_speed_percent: 0,
             driver_version: String::new(),
             cuda_version: String::new(),
@@ -143,6 +145,8 @@ impl Default for GpuData {
             memory_bus_width: 0,
             memory_clock_mhz: 0,
             gpu_clock_mhz: 0,
+            current_gpu_clock_mhz: 0,
+            current_mem_clock_mhz: 0,
             pcie_gen: 0,
             pcie_width: 0,
             // Apple fields
