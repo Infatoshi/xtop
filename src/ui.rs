@@ -529,7 +529,7 @@ fn draw_processes(frame: &mut Frame, app: &App, area: Rect) {
         format!("{:>6}{}", "CPU%", sort_indicator(SortColumn::Cpu)),
         format!("{:>6}{}", "RAM%", sort_indicator(SortColumn::Ram)),
         format!("{:>9}", "RAM"),
-        format!("{:>9}{}", "VRAM", sort_indicator(SortColumn::Vram)),
+        format!("{:>9}{}", "GPU", sort_indicator(SortColumn::Gpu)),
     ])
     .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
 

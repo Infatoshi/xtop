@@ -29,7 +29,7 @@ xtop
 ### Controls
 
 - `j/k` or arrow keys: navigate processes
-- `h/l` or left/right: change sort column (CPU/RAM/VRAM)
+- `h/l` or left/right: change sort column (CPU/RAM/GPU)
 - `K`: kill selected process (with confirmation)
 - `q`: quit
 
@@ -40,7 +40,7 @@ xtop
 - NVIDIA GPU monitoring (Linux, requires NVIDIA drivers)
 - Apple Silicon GPU monitoring (macOS, M1/M2/M3/M4 chips)
 - Network and disk I/O
-- Process list with CPU/RAM/VRAM sorting
+- Process list with CPU/RAM/GPU sorting
 - Process kill functionality
 
 ## Requirements
