@@ -238,16 +238,16 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
         return;
     }
 
-    // Split: left 1/3 for stats, right 2/3 for graph
+    // Split: top row for stats, bottom for graph
     let inner_chunks = Layout::default()
-        .direction(Direction::Horizontal)
+        .direction(Direction::Vertical)
         .constraints([
-            Constraint::Ratio(1, 3),  // Stats
-            Constraint::Ratio(2, 3),  // Graph
+            Constraint::Length(2),  // Stats row (2 lines)
+            Constraint::Min(1),     // Graph (remaining space)
         ])
         .split(inner);
 
-    // Stats on left - spaced out vertically
+    // Calculate stats
     let mem_used_gb = gpu.memory_used_bytes as f64 / 1_073_741_824.0;
     let mem_total_gb = gpu.memory_total_bytes as f64 / 1_073_741_824.0;
     let mem_percent = if gpu.memory_total_bytes > 0 {
@@ -256,66 +256,67 @@ fn draw_gpu_verbose(frame: &mut Frame, gpu: &crate::app::GpuData, area: Rect) {
         0
     };
 
-    let power_percent = if gpu.power_limit_w > 0 {
-        (gpu.power_usage_w as f64 / gpu.power_limit_w as f64 * 100.0) as u32
-    } else {
-        0
-    };
+    // Memory label differs: VRAM for NVIDIA, Mem for Apple unified
+    let mem_label = if gpu.unified_memory { "Mem" } else { "VRAM" };
 
-    // Memory label differs: VRAM for NVIDIA, Unified for Apple
-    let mem_label = if gpu.unified_memory { "Mem   " } else { "VRAM  " };
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Util  ", Style::default().fg(DIM)),
-            Span::styled(format!("{:>3}%", gpu.utilization_percent), Style::default().fg(usage_color(gpu.utilization_percent as f32))),
-        ]),
-        Line::from(""),
+    // Build stats as horizontal spans on two lines
+    let mut line1_spans = vec![
+        Span::styled("Util ", Style::default().fg(DIM)),
+        Span::styled(format!("{:>3}%", gpu.utilization_percent), Style::default().fg(usage_color(gpu.utilization_percent as f32))),
+        Span::raw("  "),
     ];
 
-    // Temperature (only show if available - Apple often doesn't expose this)
+    // Temperature
     if gpu.temperature_c > 0 || gpu.vendor == GpuVendor::Nvidia {
-        lines.push(Line::from(vec![
-            Span::styled("Temp  ", Style::default().fg(DIM)),
-            Span::styled(format!("{:>3}C", gpu.temperature_c), Style::default().fg(temp_color(gpu.temperature_c))),
-        ]));
-        lines.push(Line::from(""));
+        line1_spans.push(Span::styled("Temp ", Style::default().fg(DIM)));
+        line1_spans.push(Span::styled(format!("{:>3}C", gpu.temperature_c), Style::default().fg(temp_color(gpu.temperature_c))));
+        line1_spans.push(Span::raw("  "));
     }
 
-    lines.push(Line::from(vec![
-        Span::styled(mem_label, Style::default().fg(DIM)),
-        Span::styled(format!("{:.1}/{:.1}GB ({:>2}%)", mem_used_gb, mem_total_gb, mem_percent), Style::default().fg(usage_color(mem_percent as f32))),
-    ]));
-    lines.push(Line::from(""));
+    // Memory
+    line1_spans.push(Span::styled(format!("{} ", mem_label), Style::default().fg(DIM)));
+    line1_spans.push(Span::styled(
+        format!("{:.1}/{:.1}GB", mem_used_gb, mem_total_gb),
+        Style::default().fg(usage_color(mem_percent as f32))
+    ));
 
-    // Power (only show if we have data)
-    if gpu.power_usage_w > 0 || gpu.power_limit_w > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("Power ", Style::default().fg(DIM)),
-            Span::styled(format!("{:>3}/{:>3}W ({:>2}%)", gpu.power_usage_w, gpu.power_limit_w, power_percent), Style::default().fg(usage_color(power_percent as f32))),
-        ]));
-        lines.push(Line::from(""));
+    let mut line2_spans = Vec::new();
+
+    // Power
+    if gpu.power_usage_w > 0 {
+        let power_percent = if gpu.power_limit_w > 0 {
+            (gpu.power_usage_w as f64 / gpu.power_limit_w as f64 * 100.0) as u32
+        } else {
+            0
+        };
+        line2_spans.push(Span::styled("Power ", Style::default().fg(DIM)));
+        line2_spans.push(Span::styled(
+            format!("{:>3}/{:>3}W", gpu.power_usage_w, gpu.power_limit_w),
+            Style::default().fg(usage_color(power_percent as f32))
+        ));
+        line2_spans.push(Span::raw("  "));
     } else if gpu.power_limit_w > 0 {
         // Show TDP estimate for Apple
-        lines.push(Line::from(vec![
-            Span::styled("TDP   ", Style::default().fg(DIM)),
-            Span::styled(format!("~{}W", gpu.power_limit_w), Style::default().fg(BRIGHT)),
-        ]));
-        lines.push(Line::from(""));
+        line2_spans.push(Span::styled("TDP ", Style::default().fg(DIM)));
+        line2_spans.push(Span::styled(format!("~{}W", gpu.power_limit_w), Style::default().fg(BRIGHT)));
+        line2_spans.push(Span::raw("  "));
     }
 
-    // Fan (only for NVIDIA - most Macs don't expose fan speed)
-    if gpu.vendor == GpuVendor::Nvidia {
-        lines.push(Line::from(vec![
-            Span::styled("Fan   ", Style::default().fg(DIM)),
-            Span::styled(format!("{:>3}%", gpu.fan_speed_percent), Style::default().fg(BRIGHT)),
-        ]));
+    // Fan (only for NVIDIA)
+    if gpu.vendor == GpuVendor::Nvidia && gpu.fan_speed_percent > 0 {
+        line2_spans.push(Span::styled("Fan ", Style::default().fg(DIM)));
+        line2_spans.push(Span::styled(format!("{:>3}%", gpu.fan_speed_percent), Style::default().fg(BRIGHT)));
     }
+
+    let lines = vec![
+        Line::from(line1_spans),
+        Line::from(line2_spans),
+    ];
 
     let stats = Paragraph::new(lines);
     frame.render_widget(stats, inner_chunks[0]);
 
-    // Graph on right (2/3 of space)
+    // Graph on bottom
     let data: Vec<u64> = gpu.history.iter().map(|v| *v as u64).collect();
     let sparkline = Sparkline::default()
         .data(&data)
