@@ -9,9 +9,7 @@ Cross-platform terminal system monitor with GPU support.
 Requires [Rust](https://rustup.rs/).
 
 ```bash
-git clone https://github.com/Infatoshi/xtop.git
-cd xtop
-cargo install --path .
+cargo install --git https://github.com/Infatoshi/xtop.git
 ```
 
 ### One-liner
